@@ -1,37 +1,43 @@
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from sklearn.preprocessing import MinMaxScaler
 import seaborn as sns
+from matplotlib.artist import setp
 from sklearn.feature_selection import RFE
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix, roc_curve, precision_recall_curve, auc
 from sklearn.model_selection import KFold
+from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.utils import resample
+
 
 def process_data(data):
     print("Shape of the data:\n", data.shape)
-    
+    # Dropping specific column from data (encounter_id)
     data.drop('encounter_id', axis=1, inplace=True)
-    
+
+    # Checking the missing values
     missing_values_before = data.isnull().sum()
     print("\nSummary of missing values before replace:\n", missing_values_before)
-    
+
+    # Replacing "?" to NaN to identify missing values
     data.replace('?', np.nan, inplace=True)
 
+    # Checking the missing values after replacing
     missing_values_after = data.isnull().sum()
     print("\nSummary of missing values after replace:\n", missing_values_after)
-
+    # Mapping readmitted values to "0" and "1"
     data['readmitted'] = data['readmitted'].map({'<30': 1, '>30': 0, 'NO': 0})
-    
+
     print("\nData types of each column:\n", data.dtypes)
 
+    # Checking the columns' missing value percentage
     missing_percent = data.isnull().mean() * 100
-    
+
+    # Dropping the columns which have more than 90% percentage missing value
     columns_to_drop = missing_percent[missing_percent > 90].index
     data.drop(columns=columns_to_drop, inplace=True)
-    
+
     # Dropping cols such as payer_code and medical_specialty since they don't play a major role in predicting the target variable
     columns_to_delete = [
         'repaglinide', 'nateglinide', 'chlorpropamide', 'glimepiride', 'acetohexamide',
@@ -40,13 +46,14 @@ def process_data(data):
         'metformin-rosiglitazone', 'metformin-pioglitazone', 'payer_code', 'medical_specialty', 'patient_nbr']
 
     data.drop(columns=columns_to_delete, inplace=True)
-    
+
+    # Dropping NULL values
     data.dropna(axis=0, how='any', inplace=True)
-    # TODO: Check if A1CResult plays a major role in predicting the target variable
-    # TODO: Check if removed column values can be replaced with mean or mode
-    print("\nSummary statistics of numerical columns:\n", data.describe())
-    
+
+    print("\nSummary statistics of numerical columns:\n", data.select_dtypes(include='number').describe())
+
     return data
+
 
 def remove_outliers(df, numerical_cols, threshold=1.5):
     for col in numerical_cols:
@@ -58,135 +65,146 @@ def remove_outliers(df, numerical_cols, threshold=1.5):
         df = df[(df[col] >= lower_bound) & (df[col] <= upper_bound)]
     return df
 
-def feature_normalization(df, numerical_cols):
-    # Exclude specified columns from the list of numerical columns to normalize
-    scaler = MinMaxScaler()
-    # Normalize only the columns that are not excluded
-    df[numerical_cols] = scaler.fit_transform(df[numerical_cols])
-    return df
 
 def data_visualisation(data, categorical_int_cols):
-    # distribution of unique classes of the target variable
-    ax = sns.barplot(x='readmitted', y='readmitted', estimator=lambda x: len(x) / len(data) * 100, 
-                     data=data, hue="readmitted", legend=False)
-    
+    # Specifying order and labels for readmitted graph
+    readmission_order = [0, 1]
+    readmission_legend_labels = ['Non-Readmitted', 'Readmitted']
+    # Distribution of the target variable
+    ax = sns.barplot(x='readmitted', y='readmitted', estimator=lambda x: len(x) / len(data) * 100,
+                     data=data, hue='readmitted', order=readmission_order, hue_order=readmission_order)
+    # Giving percentage to the bars
     for container in ax.containers:
         ax.bar_label(container, fmt='%.f%%')
 
+    # Specifying name of the graph and axis
     ax.set_ylabel('Percentage (%)')
-    sns.set_theme(rc={"figure.figsize":(10, 7)})
+    ax.set_xlabel('Readmission')
+    ax.set_title('Distribution of Readmission')
+    # Showing the graph
     plt.show()
 
-    # count of number of readmitted cases against age
-    value_counts = data.sort_values('age').groupby('age')['readmitted'].value_counts().unstack()    
-    fig, ax3 = plt.subplots()
+    # distribution of a 'readmitted' column based on different ages
+    value_counts = data.sort_values('age').groupby('age')['readmitted'].value_counts().unstack()
+    fig, ax3 = plt.subplots(figsize=(12, 8))
 
+    # Creating a graph for number of readmitted cases against age
     bars = ax3.bar(value_counts.index, value_counts[1])
     ax3.bar_label(bars)
-    
+
     plt.xlabel("Age Groups")
     plt.ylabel("Readmitted Cases")
-    plt.title("Count of number of readmitted cases against age")
+    plt.title("Number of Readmitted Cases Against Age")
     plt.show()
 
-    # count of target variable against the number of medications
-    ax2 = sns.countplot(x="num_medications", data=data, hue="readmitted", legend=False)
-    
+    # Creating a graph for number of target variable against the number of medications
+    plt.figure(figsize=(16, 8))
+    ax2 = sns.countplot(x="num_medications", data=data, hue="readmitted", hue_order=readmission_order, legend=False)
     for container in ax2.containers:
         ax2.bar_label(container)
-
-    ax2.get_legend_handles_labels()
-    target_unique_classes = data['readmitted'].value_counts().index
-    ax2.legend(labels=target_unique_classes, title="readmitted", loc="upper right")
-    
-    sns.set_theme(rc={"figure.figsize":(10, 7)})
-    plt.xticks(rotation=45, ha='right')
+    ax2.legend(labels=readmission_legend_labels, loc="upper right")
+    plt.xlabel("Number of Medications")
+    plt.ylabel("Number of People Readmitted / Non-Readmitted")
+    plt.title("Number of Medications Vs Readmitted Cases")
     plt.show()
-
 
     # Creating a new DataFrame with only the specified numerical columns
     num_df = data.select_dtypes(include='number')
+    # Removing some numerical cols which are actually categorical
     num_df.drop(categorical_int_cols, axis=1, inplace=True)
 
+    # Plotting correlation matrix
     plot_correlation_matrix(num_df)
+    # Plotting scatter matrix
     plot_scatter_matrix(num_df)
-        
-    gender_plot = sns.countplot(x = 'gender', data = data, hue = 'readmitted')
-    gender_plot.figure.set_size_inches(12, 12)
-    gender_plot.legend(title = 'Readmitted', labels = ['No', 'Yes'])
+
+    # Plotting Additional Graphs
+
+    # Plotting a graph of Readmission Based on the gender
+    plt.figure(figsize=(12, 8))
+    gender_plot = sns.countplot(x='gender', data=data, hue='readmitted', hue_order=readmission_order)
+    gender_plot.legend(labels=readmission_legend_labels, loc="upper right")
     gender_plot.axes.set_title('Readmission based on Gender')
+    plt.xlabel("Genders")
+    plt.ylabel("Number of People Readmitted / Non-Readmitted")
+    plt.show()
+    # Plotting Race and Gender Graph
+    legend_for_race = ["Caucasian", "AfricanAmerican", "Asian", "Hispanic", "Other"]
+    legend_for_gender = ["Male", "Female"]
+    fig, ax = plt.subplots(figsize=(12, 8), ncols=2, nrows=1)
+    race = sns.countplot(x="race", data=data, ax=ax[0], hue="race", order=legend_for_race, hue_order=legend_for_race)
+    plt.subplots_adjust(bottom=0.25, top=0.9, left=0.15, right=0.85)
+    race.legend(labels=legend_for_race, loc="upper right")
+    gender = sns.countplot(x="gender", data=data, ax=ax[1], hue="gender")
+    gender.legend(labels=legend_for_gender, loc="upper right")
+    ax[0].tick_params(axis="x", rotation=45)
+    ax[1].tick_params(axis="x", rotation=45)
+    gender.set_xlabel("Gender", fontsize=10, weight='bold')
+    race.set_xlabel("Race", fontsize=10, weight='bold')
+    ax[1].xaxis.set_label_coords(0.5, -0.2)
+    plt.subplots_adjust(wspace=1)
+
     plt.show()
 
-
-    fig, ax = plt.subplots(figsize=(10,15), ncols=1, nrows=3)  # Adjusted for 1 column and 3 rows
-    sns.countplot(x="readmitted", data=data, ax=ax[0])  # Plot 1 in the first row
-    sns.countplot(x="race", data=data, ax=ax[1])        # Plot 2 in the second row
-    sns.countplot(x="gender", data=data, ax=ax[2])      # Plot 3 in the third row
-    plt.tight_layout()  # Adjust the layout to make sure there's no overlap
-    plt.show()
 
 def plot_scatter_matrix(num_df):
+    # Visualisation the correlation matrix
+    axes = pd.plotting.scatter_matrix(num_df, alpha=0.2, figsize=(18, 10), diagonal='kde')
 
-    pd.plotting.scatter_matrix(num_df, alpha=0.2, figsize=(20, 20), diagonal='kde')
+    # Adjustments for correlation matrix
+    for ax in axes.flatten():
+        ax.yaxis.label.set_rotation(0)
+        ax.yaxis.label.set_ha('right')
+        setp(ax.get_xticklabels(), rotation=0)
+
     plt.suptitle('Scatter Matrix for Selected Numerical Features')
     plt.show()
 
+
 def plot_correlation_matrix(num_df):
-
     # Calculate the correlation matrix
-    corr_matrix= num_df.corr()
+    corr_df = num_df.drop(columns=['readmitted'])
+    corr_matrix = corr_df.corr()
 
-    # Drop the 'NaN' correlations
-    plt.figure(figsize=(12, 12))
+    # Adjustments for fitting
+    fig, ax = plt.subplots(figsize=(15, 8))
+    plt.subplots_adjust(bottom=0.25, top=0.9, left=0.15, right=1)
 
     # Visualisation the correlation matrix
-    sns.heatmap(corr_matrix,annot=True, cmap='coolwarm', vmin=-1, vmax=1)
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', vmin=-1, vmax=1, ax=ax)
     plt.xticks(rotation=45, ha='right')
 
     # Add labels for axes
-    plt.xlabel('Features')
-    plt.ylabel('Features')
+    plt.xlabel("Numerical Features", fontsize=10, weight='bold', labelpad=10)
+    plt.ylabel("Numerical Features", fontsize=10, weight='bold', labelpad=10)
 
-    #TODO add labels to  the xticks
-    plt.title("Correlation matrix")
-    plt.xlabel("Numerical Features")
-    plt.ylabel("Numerical Features")
+    plt.title("Correlation Matrix of Numerical Features", pad=10)
+
     plt.show()
 
     # Threshold for high correlation (can be adjusted)
-    # TODO Evaluate hıghly corr
-    threshold = 0.2
-    # Declaration of pairs from matrix
+    threshold = 0.25
+    # Declaration of highly correlated pairs from matrix
     highly_correlated_pairs = corr_matrix.unstack().sort_values(kind="quicksort", ascending=False)
     # Removing self-correlation and correlations below than the threshold
-    highly_correlated_pairs = highly_correlated_pairs[(abs(highly_correlated_pairs) > threshold) & (highly_correlated_pairs < 1)]
+    highly_correlated_pairs = highly_correlated_pairs[
+        (abs(highly_correlated_pairs) > threshold) & (highly_correlated_pairs < 1)]
 
     # Listing highly correlated pairs
-    print("Highly correlated pairs:\n", highly_correlated_pairs.to_string())
-
-
-
-def plot_avg_lab_procedures_by_race(data):
-    # Bar Chart of Average Number of Lab Procedures by Race
-    average_lab_procedures_by_race = data.groupby('race')['num_lab_procedures'].mean().reset_index()
-    sns.barplot(data=average_lab_procedures_by_race, x="race", y='num_lab_procedures')
-    plt.figure(figsize=(12, 12))
-    plt.title('Average Number of Lab Procedures by Race')
-    plt.xticks(rotation=45)
-    plt.show()
+    print("\nHighly Correlated Pairs:\n")
+    for (idx1, idx2), value in highly_correlated_pairs.items():
+        print(f"{idx1} <-> {idx2}: {value}")
 
 
 def evaluate_model_performance(data):
-    # Skipping diag_1, diag_2 and diag_3 since they have too many distinct values
+    # Dropping diag_1, diag_2 and diag_3 since they have too many distinct values
     data = data.drop(['diag_1', 'diag_2', 'diag_3'], axis=1)
-
     # Convert categorical variables to dummy variables
-    cat_cols = ['race', 'gender', 'age', 'admission_type_id' , 'discharge_disposition_id', 'admission_source_id', 
-                'A1Cresult', 'metformin', 'glipizide', 'glyburide', 'pioglitazone', 'rosiglitazone', 'insulin', 'change', 'diabetesMed']
+    cat_cols = ['race', 'gender', 'age', 'admission_type_id', 'discharge_disposition_id', 'admission_source_id', 'A1Cresult', 'metformin', 'glipizide', 'glyburide', 'pioglitazone', 'rosiglitazone',
+                'insulin', 'change', 'diabetesMed']
     data = pd.get_dummies(data, columns=cat_cols, drop_first=True)
 
     print('The shape of the data after converting categorical variables to dummy variables:', data.shape)
-    # print('The columns of the data after converting categorical variables to dummy variables:', data.columns.values)
 
     # Splitting dataset into features (X) and target (y)
     X = data.drop('readmitted', axis=1)
@@ -197,7 +215,7 @@ def evaluate_model_performance(data):
 
     # Feature selection with RFE
     model = LogisticRegression(max_iter=1000, solver='liblinear')
-    rfe = RFE(estimator=model, n_features_to_select=20)
+    rfe = RFE(estimator=model, n_features_to_select=5)
     rfe.fit(X_train, y_train)
 
     # Selected features
@@ -212,7 +230,6 @@ def evaluate_model_performance(data):
 
     # Model predictions
     y_pred = model.predict(X_test[selected_features])
-
     # Performance metrics
     overall_metrics = {
         "Accuracy": accuracy_score(y_test, y_pred),
@@ -221,7 +238,7 @@ def evaluate_model_performance(data):
         "F1 Score": f1_score(y_test, y_pred),
         "ROC AUC": roc_auc_score(y_test, y_pred)
     }
-
+    
     # confusion matrix
     confmat = confusion_matrix(y_true=y_test, y_pred=y_pred)
 
@@ -242,18 +259,6 @@ def evaluate_model_performance(data):
         item.set_fontsize(15)
     plt.show()
 
-    # Calculate precision and recall. Also the Area Under the Curve (AUC) for precision-recall curve
-    precision, recall, thresholds = precision_recall_curve(y_test, y_pred)
-    auc_score = auc(recall, precision)
-
-    plt.figure(figsize=(8, 6))
-    plt.plot(recall, precision, label=f'Precision-Recall Curve (AUC = {auc_score:.2f})')
-    plt.xlabel('Recall')
-    plt.ylabel('Precision')
-    plt.title('Precision-Recall Curve')
-    plt.legend()
-    plt.show()
-
     # ROC curve
     # Predict probabilities & get probability of positive class
     y_pred_proba = model.predict_proba(X_test[selected_features])[:, 1]
@@ -268,16 +273,35 @@ def evaluate_model_performance(data):
     plt.ylim([-0.05, 1.05])
     plt.xlabel('False Positive Rate')
     plt.ylabel('True Positive Rate')
+ 
+    precision, recall, thresholds = precision_recall_curve(y_test, y_pred_proba)   
+    auc_score = auc(recall, precision)
 
-    plt.title('ROC Curve')
-    plt.legend(loc="lower right")
-    plt.tight_layout()
-    plt.legend(loc=4, prop={'size': 18})
+    # Plot the mean ROC curve
+    ax.plot(fpr, tpr, color='blue',
+            label=f'Mean ROC (AUC = {auc_score:.2f})', lw=2, alpha=0.8)
+    ax.plot([0, 1], [0, 1], linestyle='--', lw=2, color='red', label='Chance', alpha=0.8)
+    ax.set(xlim=[-0.05, 1.05], ylim=[-0.05, 1.05], title="ROC Curve")
+    ax.legend(loc="lower right")
+    plt.xlabel("False Positive Rate")
+    plt.ylabel("True Positive Rate")
+    plt.show()
 
     for item in ([ax.title, ax.xaxis.label, ax.yaxis.label] + ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(20)
     for item in (ax.get_xticklabels() + ax.get_yticklabels()):
         item.set_fontsize(15)
+    plt.show()
+
+    # Calculate precision and recall. Also the Area Under the Curve (AUC) for precision-recall curve
+    plt.figure(figsize=(8, 6))
+    plt.plot(recall, precision, marker='.', label=f'Precision-Recall Curve (AUC = {auc_score:.2f})')
+    # Adding baseline -- no skill line (precision = no. of positives / total no. of samples)
+    plt.plot([0, 1], [len(y_test[y_test==1]) / len(y_test), len(y_test[y_test==1]) / len(y_test)], linestyle='--', label='No Skill')
+    plt.xlabel('Recall')
+    plt.ylabel('Precision')
+    plt.title('Precision-Recall Curve')
+    plt.legend()
     plt.show()
 
     # Output the results
@@ -289,66 +313,90 @@ def evaluate_model_performance(data):
 
 
 def balance_data_oversampling(data):
-    df_majority = data[data.readmitted==0]
-    df_minority = data[data.readmitted==1]
-    
+    # re-distributing target variable
+    df_majority = data[data.readmitted == 0]
+    df_minority = data[data.readmitted == 1]
+
     # Upsample minority class
-    df_minority_upsampled = resample(df_minority, 
-                                     replace=True,     
-                                     n_samples=len(df_majority),   
+    df_minority_upsampled = resample(df_minority,
+                                     replace=True,
+                                     n_samples=len(df_majority),
                                      random_state=123)
-    
+
     # Combine majority class with upsampled minority class
     df_upsampled = pd.concat([df_majority, df_minority_upsampled])
-    
+
     # Display new class counts
     print(df_upsampled.readmitted.value_counts())
-    
+
     return df_upsampled
 
+
 def main():
+    # Reading Dataset
     data = pd.read_csv('diabetic_data.csv')
+
+    # Data Processing
     data = process_data(data)
     print('The shape of the data after processing:', data.shape)
+    # Deciding target variable
     target_var = ['readmitted']
     print('The numerical cols are:', data.select_dtypes(include='number').columns.values)
-   
-    # Removing outliers
+
     # Not removing outliers from these columns since they are categorical types
     categorical_int_cols = ['admission_type_id', 'discharge_disposition_id', 'admission_source_id']
-   
+
     # Not removing outliers from these columns since values are inside 3 standard deviations
-    non_outlier_cols = ['number_outpatient', 'number_emergency', 'number_inpatient', 'time_in_hospital', 'num_procedures']
+    non_outlier_cols = ['number_outpatient', 'number_emergency', 'number_inpatient', 'time_in_hospital',
+                        'num_procedures']
+
+    # Deciding columns which won't processed for outlier removal
     final_non_outlier_cols = target_var + categorical_int_cols + non_outlier_cols
+
     print("\nColumns that are not outliers:\n", final_non_outlier_cols)
-    
-    # Exclude the non-outlier columns
+
+    # Specifying numerical columns
     numerical_cols = data.select_dtypes(include='number').columns
+
+    # Boxplot for non-outlier columns
+    plt.figure(figsize=(20, 10))
+    for i, col in enumerate(final_non_outlier_cols, 1):
+        plt.subplot(3, 3, i)
+        data.boxplot(col)
+        plt.title(col)
+    plt.tight_layout()
+    plt.show()
+
+    # Exclude the non-outlier columns
     numerical_cols = numerical_cols.drop(final_non_outlier_cols)
 
+    # Removing outliers
     print('\n Dropping outliers from: ', numerical_cols.values)
     data = remove_outliers(data, numerical_cols, threshold=1.5)
 
     # We are not performing normalisation on any of the columns since the range of the values for every feature has insignificant difference
-    # feature_normalization(data, numerical_cols)
+
     print("\nFinal shape of the data:\n", data.shape)
+    print(data.columns.values)
 
     # Data Visualisation
     data_visualisation(data, categorical_int_cols)
-    
+
     # Evaluate model performance
     results = evaluate_model_performance(data)
-    print("\n", results, "\n")
+    print(results)
 
     # Perform oversampling to balance the data
-    data_balanced = balance_data_oversampling(data)    
-    print('\nThe shape of the balanced data:', data_balanced.shape)
-    
+    data_balanced = balance_data_oversampling(data)
+    print('The shape of the balanced data:', data_balanced.shape)
+
     # Evaluate model performance after balancing the data
     results = evaluate_model_performance(data_balanced)
-    print("\n", results, "\n")
+    print(results)
 
     # data.to_csv('processed_data.csv', index=False)
+
+    # Further analysis of improved model is performed in the next file. Please refer to 'improvedModel.py'
 
 
 if __name__ == '__main__':
